@@ -43,12 +43,6 @@
 .PARAMETER TenantId
     Entra tenant ID. Required for interactive and app-registration auth.
 
-.PARAMETER ClientId
-    App Registration client ID.
-
-.PARAMETER ClientSecret
-    App Registration client secret as a SecureString.
-
 .PARAMETER ExportPath
     Folder for CSV exports. Defaults to the script directory.
 
