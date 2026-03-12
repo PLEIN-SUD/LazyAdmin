@@ -5,8 +5,8 @@
 .DESCRIPTION
     This script removes stale devices from Microsoft Entra ID based on the ApproximateLastSignInDateTime.
     It uses a two-stage approach:
-      Stage 1 – Disable devices inactive for more than -StaleThresholdDays (default: 90)
-      Stage 2 – Delete devices that are ALREADY disabled AND inactive for more than -DeleteThresholdDays (default: 120)
+      Stage 1 - Disable devices inactive for more than -StaleThresholdDays (default: 90)
+      Stage 2 - Delete devices that are ALREADY disabled AND inactive for more than -DeleteThresholdDays (default: 120)
 
     Safety guards (per Microsoft recommendations):
       - System-managed devices (Autopilot etc.) are never touched.
@@ -66,9 +66,9 @@
     Date:    2026-03-12
 
     Required Microsoft Graph permissions:
-      Device.Read.All          – list devices
-      Device.ReadWrite.All     – disable and delete devices
-      BitLockerKey.Read.All    – check for stored recovery keys
+      Device.Read.All          - list devices
+      Device.ReadWrite.All     - disable and delete devices
+      BitLockerKey.Read.All    - check for stored recovery keys
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -86,9 +86,9 @@ param (
 
 $ErrorActionPreference = "Stop"
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # Logging
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Write-Log {
     param(
         [string]$Message,
@@ -103,9 +103,9 @@ function Write-Log {
     }
 }
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # Connect to Microsoft Graph
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Connect-ToGraph {
 
      # Check if already connected with a valid session
@@ -131,9 +131,9 @@ function Connect-ToGraph {
     Write-Log "Connected to Microsoft Graph." -Level SUCCESS
 }
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # BitLocker: does this device have keys stored in Entra ID?
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Test-HasBitLockerKey {
     param([string]$DeviceId)
     try {
@@ -143,16 +143,16 @@ function Test-HasBitLockerKey {
     }
     catch {
         # Fail safe: if we can't check, assume a key exists
-        Write-Log "Cannot query BitLocker keys for $DeviceId – treating as protected." -Level WARNING
+        Write-Log "Cannot query BitLocker keys for $DeviceId - treating as protected." -Level WARNING
         return $true
     }
 }
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # Autopilot / system-managed detection
 # Microsoft: "Don't delete system-managed devices such as Autopilot.
 #             Once deleted, they can't be reprovisioned."
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Test-IsSystemManaged {
     param($Device)
 
@@ -162,15 +162,15 @@ function Test-IsSystemManaged {
     # Co-managed / Autopilot enrollment types
     if ($Device.EnrollmentType -in @("windowsCoManagement","azureAdJoined")) { return $true }
 
-    # Hybrid Entra Joined devices are managed via on-premises AD – skip them
+    # Hybrid Entra Joined devices are managed via on-premises AD - skip them
     if ($Device.TrustType -eq "ServerAd") { return $true }
 
     return $false
 }
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # Exclusion by name pattern or OS
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Test-IsExcluded {
     param($Device)
     foreach ($os in $ExcludeOperatingSystems) {
@@ -182,9 +182,9 @@ function Test-IsExcluded {
     return $false
 }
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # CSV export
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Export-Report {
     param($Data, [string]$Suffix)
     $file = Join-Path $ExportPath "EntraID_${Suffix}_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
@@ -193,15 +193,15 @@ function Export-Report {
 }
 
 
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 # MAIN
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 
 Write-Log "========================================================"
-Write-Log " Entra ID Stale Device Cleanup  –  LazyAdmin.nl"
+Write-Log " Entra ID Stale Device Cleanup  -  LazyAdmin.nl"
 Write-Log " Disable threshold : $StaleThresholdDays days"
 Write-Log " Delete threshold  : $DeleteThresholdDays days"
-Write-Log " Mode              : $(if ($ReportOnly) { 'REPORT ONLY – no changes will be made' } else { 'LIVE – devices WILL be disabled / deleted' })"
+Write-Log " Mode              : $(if ($ReportOnly) { 'REPORT ONLY - no changes will be made' } else { 'LIVE - devices WILL be disabled / deleted' })"
 Write-Log "========================================================"
 
 if ($DeleteThresholdDays -le $StaleThresholdDays) {
@@ -273,14 +273,14 @@ foreach ($device in $allDevices) {
         SkipReason                = $null
     }
 
-    # ── Exclusion filters ───────────────────────────────────
+    # --Exclusion filters
     if (Test-IsExcluded $device) {
         $entry.SkipReason   = "ExcludedByFilter"
         $entry.PlannedAction = "Skipped"
         $skipped.Add($entry); continue
     }
 
-    # ── System-managed / Autopilot guard ────────────────────
+    # --System-managed / Autopilot guard 
     if (Test-IsSystemManaged $device) {
         Write-Log "Skipping system-managed device: $($device.DisplayName)" -Level WARNING
         $entry.SkipReason   = "SystemManaged"
@@ -288,7 +288,7 @@ foreach ($device in $allDevices) {
         $skipped.Add($entry); continue
     }
 
-    # ── Stage 2: delete candidate ───────────────────────────
+    # --Stage 2: delete candidate
     # Device is already disabled AND past the delete threshold
     if ($lastSignIn -le $deleteCutoff -and $device.AccountEnabled -eq $false) {
 
@@ -296,7 +296,7 @@ foreach ($device in $allDevices) {
         $entry.HasBitLockerKey = $hasBLKey
 
         if ($hasBLKey -and -not $IncludeBitLockerDevices) {
-            Write-Log "Skipping – BitLocker key present: $($device.DisplayName)" -Level WARNING
+            Write-Log "Skipping - BitLocker key present: $($device.DisplayName)" -Level WARNING
             $entry.SkipReason    = "BitLockerKeyPresent"
             $entry.PlannedAction  = "Skipped"
             $skipped.Add($entry); continue
@@ -306,7 +306,7 @@ foreach ($device in $allDevices) {
         $toDelete.Add($entry); continue
     }
 
-    # ── Stage 1: disable candidate ──────────────────────────
+    # --Stage 1: disable candidate
     if ($lastSignIn -le $disableCutoff -and $device.AccountEnabled -eq $true) {
         $entry.PlannedAction = "Disable"
         $toDisable.Add($entry)
@@ -327,20 +327,20 @@ if ($toDisable.Count -eq 0 -and $toDelete.Count -eq 0) {
 }
 
 if ($ReportOnly) {
-    Write-Log "`n── Devices that WOULD be disabled ──────────────────────"
+    Write-Log "`n--Devices that WOULD be disabled"
     $toDisable | Format-Table DisplayName, OperatingSystem, ApproximateLastSignInDate, DaysSinceLastSignIn, TrustType -AutoSize | Out-String | Write-Output
 
-    Write-Log "── Devices that WOULD be deleted ───────────────────────"
+    Write-Log "--Devices that WOULD be deleted"
     $toDelete  | Format-Table DisplayName, OperatingSystem, ApproximateLastSignInDate, DaysSinceLastSignIn, HasBitLockerKey -AutoSize | Out-String | Write-Output
 
-    Write-Log "ReportOnly mode active – no changes were made." -Level WARNING
+    Write-Log "ReportOnly mode active - no changes were made." -Level WARNING
     Disconnect-MgGraph | Out-Null
     exit 0
 }
 
-# ─────────────────────────────────────────────────────────────
-# Stage 1 – Disable stale active devices
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
+# Stage 1 - Disable stale active devices
+# -------------------------------------------------------------
 Write-Log "--- Stage 1: Disabling stale devices ---"
 $disableResults = [System.Collections.Generic.List[object]]::new()
 
@@ -352,14 +352,14 @@ foreach ($device in $toDisable) {
     }
     catch {
         Write-Log "Failed to disable $($device.DisplayName): $_" -Level WARNING
-        $device.PlannedAction = "DisableFailed – $($_.Exception.Message)"
+        $device.PlannedAction = "DisableFailed - $($_.Exception.Message)"
     }
     $disableResults.Add($device)
 }
 
-# ─────────────────────────────────────────────────────────────
-# Stage 2 – Delete disabled stale devices
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
+# Stage 2 - Delete disabled stale devices
+# -------------------------------------------------------------
 Write-Log "--- Stage 2: Deleting disabled stale devices ---"
 $deleteResults = [System.Collections.Generic.List[object]]::new()
 
@@ -371,7 +371,7 @@ foreach ($device in $toDelete) {
     }
     catch {
         Write-Log "Failed to delete $($device.DisplayName): $_" -Level WARNING
-        $device.PlannedAction = "DeleteFailed – $($_.Exception.Message)"
+        $device.PlannedAction = "DeleteFailed - $($_.Exception.Message)"
     }
     $deleteResults.Add($device)
 }

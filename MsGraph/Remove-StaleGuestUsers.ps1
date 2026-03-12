@@ -5,8 +5,8 @@
 .DESCRIPTION
     This script removes stale Guest users from Microsoft Entra ID based on their last successful
     sign-in date. It uses the same two-stage approach as the device cleanup script:
-      Stage 1 – Disable guests inactive for more than -StaleThresholdDays (default: 90)
-      Stage 2 – Delete guests that are ALREADY disabled AND inactive for more than -DeleteThresholdDays (default: 120)
+      Stage 1 - Disable guests inactive for more than -StaleThresholdDays (default: 90)
+      Stage 2 - Delete guests that are ALREADY disabled AND inactive for more than -DeleteThresholdDays (default: 120)
 
     Never-signed-in guests (invite/creation date older than -NeverSignedInDays, default: 7) are
     reported separately and flagged for review. They are not automatically deleted but will be
@@ -62,9 +62,9 @@
     Date:    2026-03-12
 
     Required Microsoft Graph permissions:
-      User.Read.All          – list users and sign-in activity
-      User.ReadWrite.All     – disable and delete users
-      AuditLog.Read.All      – read sign-in activity via signInActivity property
+      User.Read.All          - list users and sign-in activity
+      User.ReadWrite.All     - disable and delete users
+      AuditLog.Read.All      - read sign-in activity via signInActivity property
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -83,9 +83,9 @@ param (
 
 $ErrorActionPreference = "Stop"
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # Logging
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Write-Log {
     param(
         [string]$Message,
@@ -100,9 +100,9 @@ function Write-Log {
     }
 }
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # Connect to Microsoft Graph
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Connect-ToGraph {
     # Reuse existing session if available
     $context = Get-MgContext
@@ -127,9 +127,9 @@ function Connect-ToGraph {
     Write-Log "Connected to Microsoft Graph." -Level SUCCESS
 }
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # Exclusion: guest UPN domain
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Test-IsExcludedDomain {
     param([string]$UserPrincipalName)
     # Guest UPNs are formatted as name_domain.com#EXT#@tenant.onmicrosoft.com
@@ -143,9 +143,9 @@ function Test-IsExcludedDomain {
     return $false
 }
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # CSV export
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Export-Report {
     param($Data, [string]$Suffix)
     $file = Join-Path $ExportPath "EntraID_GuestUsers_${Suffix}_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
@@ -154,16 +154,16 @@ function Export-Report {
 }
 
 
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 # MAIN
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 
 Write-Log "========================================================"
-Write-Log " Entra ID Stale Guest User Cleanup  –  LazyAdmin.nl"
+Write-Log " Entra ID Stale Guest User Cleanup  -  LazyAdmin.nl"
 Write-Log " Disable threshold      : $StaleThresholdDays days"
 Write-Log " Delete threshold       : $DeleteThresholdDays days"
 Write-Log " Never signed-in flag   : $NeverSignedInDays days since invite"
-Write-Log " Mode                   : $(if ($ReportOnly) { 'REPORT ONLY – no changes will be made' } else { 'LIVE – guests WILL be disabled / deleted' })"
+Write-Log " Mode                   : $(if ($ReportOnly) { 'REPORT ONLY - no changes will be made' } else { 'LIVE - guests WILL be disabled / deleted' })"
 Write-Log "========================================================"
 
 if ($DeleteThresholdDays -le $StaleThresholdDays) {
@@ -222,14 +222,14 @@ foreach ($guest in $allGuests) {
         SkipReason                      = $null
     }
 
-    # ── Exclude by domain ───────────────────────────────────
+    # --Exclude by domain
     if (Test-IsExcludedDomain $guest.UserPrincipalName) {
         $entry.SkipReason    = "ExcludedDomain"
         $entry.PlannedAction = "Skipped"
         $skipped.Add($entry); continue
     }
 
-    # ── Never signed in ─────────────────────────────────────
+    # --Never signed in
     if (-not $lastSignIn) {
         if ($createdDate -and $createdDate -lt $neverSignedInCutoff) {
             $entry.PlannedAction = "NeverSignedIn"
@@ -243,13 +243,13 @@ foreach ($guest in $allGuests) {
         continue
     }
 
-    # ── Stage 2: delete candidate ───────────────────────────
+    # --Stage 2: delete candidate ───────────────────────────
     if ($lastSignIn -le $deleteCutoff -and $guest.AccountEnabled -eq $false) {
         $entry.PlannedAction = "Delete"
         $toDelete.Add($entry); continue
     }
 
-    # ── Stage 1: disable candidate ──────────────────────────
+    # --Stage 1: disable candidate ──────────────────────────
     if ($lastSignIn -le $disableCutoff -and $guest.AccountEnabled -eq $true) {
         $entry.PlannedAction = "Disable"
         $toDisable.Add($entry)
@@ -271,23 +271,23 @@ if ($toDisable.Count -eq 0 -and $toDelete.Count -eq 0) {
 }
 
 if ($ReportOnly) {
-    Write-Log "`n── Guests that WOULD be disabled ───────────────────────"
+    Write-Log "`n--Guests that WOULD be disabled"
     $toDisable | Format-Table DisplayName, UserPrincipalName, LastSuccessfulSignInDateTime, DaysSinceLastSignIn -AutoSize | Out-String | Write-Output
 
-    Write-Log "── Guests that WOULD be deleted ────────────────────────"
+    Write-Log "--Guests that WOULD be deleted"
     $toDelete | Format-Table DisplayName, UserPrincipalName, LastSuccessfulSignInDateTime, DaysSinceLastSignIn -AutoSize | Out-String | Write-Output
 
-    Write-Log "── Guests that have NEVER signed in ────────────────────"
+    Write-Log "--Guests that have NEVER signed in"
     $neverSignedIn | Format-Table DisplayName, UserPrincipalName, CreatedDateTime, ExternalUserState -AutoSize | Out-String | Write-Output
 
-    Write-Log "ReportOnly mode active – no changes were made." -Level WARNING
+    Write-Log "ReportOnly mode active - no changes were made." -Level WARNING
     Disconnect-MgGraph | Out-Null
     exit 0
 }
 
-# ─────────────────────────────────────────────────────────────
-# Stage 1 – Disable stale active guests
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
+# Stage 1 - Disable stale active guests
+# -------------------------------------------------------------
 Write-Log "--- Stage 1: Disabling stale guests ---"
 $disableResults = [System.Collections.Generic.List[object]]::new()
 
@@ -299,14 +299,14 @@ foreach ($guest in $toDisable) {
     }
     catch {
         Write-Log "Failed to disable $($guest.DisplayName): $_" -Level WARNING
-        $guest.PlannedAction = "DisableFailed – $($_.Exception.Message)"
+        $guest.PlannedAction = "DisableFailed - $($_.Exception.Message)"
     }
     $disableResults.Add($guest)
 }
 
-# ─────────────────────────────────────────────────────────────
-# Stage 2 – Delete disabled stale guests
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
+# Stage 2 - Delete disabled stale guests
+# -------------------------------------------------------------
 Write-Log "--- Stage 2: Deleting disabled stale guests ---"
 $deleteResults = [System.Collections.Generic.List[object]]::new()
 
@@ -318,7 +318,7 @@ foreach ($guest in $toDelete) {
     }
     catch {
         Write-Log "Failed to delete $($guest.DisplayName): $_" -Level WARNING
-        $guest.PlannedAction = "DeleteFailed – $($_.Exception.Message)"
+        $guest.PlannedAction = "DeleteFailed - $($_.Exception.Message)"
     }
     $deleteResults.Add($guest)
 }

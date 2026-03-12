@@ -13,8 +13,8 @@
       - Teams channel messages count / last activity date
 
     The script uses the same two-stage approach as the device and guest cleanup scripts:
-      Stage 1 – Flag group as stale (report only, no destructive action at this stage)
-      Stage 2 – Delete groups that have been stale for more than -DeleteThresholdDays
+      Stage 1 - Flag group as stale (report only, no destructive action at this stage)
+      Stage 2 - Delete groups that have been stale for more than -DeleteThresholdDays
 
     Note: Microsoft 365 Groups that are connected to a Team, have active SharePoint sites, or
     have active Exchange mailboxes are flagged individually so you can review before deletion.
@@ -29,7 +29,7 @@
 
 .PARAMETER DeleteThresholdDays
     Days since last activity before a stale group is DELETED. Default: 180.
-    Intentionally higher default than devices/users – M365 Groups often contain valuable data.
+    Intentionally higher default than devices/users - M365 Groups often contain valuable data.
 
 .PARAMETER ReportOnly
     List which groups would be deleted without making any changes.
@@ -66,10 +66,10 @@
     Date:    2026-03-12
 
     Required Microsoft Graph permissions:
-      Group.Read.All               – list groups
-      Group.ReadWrite.All          – delete groups
-      Reports.Read.All             – read M365 activity reports
-      TeamSettings.Read.All        – read Teams connection status
+      Group.Read.All               - list groups
+      Group.ReadWrite.All          - delete groups
+      Reports.Read.All             - read M365 activity reports
+      TeamSettings.Read.All        - read Teams connection status
 
     Note on report data freshness:
       The Microsoft 365 Groups activity report data has a 48-hour delay. This is a platform
@@ -91,9 +91,9 @@ param (
 
 $ErrorActionPreference = "Stop"
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # Logging
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Write-Log {
     param(
         [string]$Message,
@@ -110,9 +110,9 @@ function Write-Log {
     }
 }
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # Connect to Microsoft Graph
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Connect-ToGraph {
 
     # Reuse existing session if available
@@ -138,9 +138,9 @@ function Connect-ToGraph {
     Write-Log "Connected to Microsoft Graph." -Level SUCCESS
 }
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # Exclusion by display name pattern
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Test-IsExcluded {
     param([string]$DisplayName)
 
@@ -151,9 +151,9 @@ function Test-IsExcluded {
     return $false
 }
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # Storage formatting helper
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Format-Bytes {
     param([long]$Bytes)
 
@@ -164,9 +164,9 @@ function Format-Bytes {
     return "$Bytes B"
 }
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # Resolve the most recent activity date across all three signals
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Get-LastActivityDate {
     param($ActivityRow)
     if ($ActivityRow.'Last Activity Date' -and $ActivityRow.'Last Activity Date' -ne '') {
@@ -175,9 +175,9 @@ function Get-LastActivityDate {
     return $null
 }
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # CSV export
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 function Export-Report {
     param($Data, [string]$Suffix)
 
@@ -187,15 +187,15 @@ function Export-Report {
 }
 
 
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 # MAIN
-# ═════════════════════════════════════════════════════════════
+# =============================================================
 
 Write-Log "========================================================"
-Write-Log " Entra ID Stale M365 Group Cleanup  –  LazyAdmin.nl"
+Write-Log " Entra ID Stale M365 Group Cleanup  -  LazyAdmin.nl"
 Write-Log " Stale threshold  : $StaleThresholdDays days"
 Write-Log " Delete threshold : $DeleteThresholdDays days"
-Write-Log " Mode             : $(if ($ReportOnly) { 'REPORT ONLY – no changes will be made' } else { 'LIVE – groups WILL be deleted' })"
+Write-Log " Mode             : $(if ($ReportOnly) { 'REPORT ONLY - no changes will be made' } else { 'LIVE - groups WILL be deleted' })"
 Write-Log "========================================================"
 
 if ($DeleteThresholdDays -le $StaleThresholdDays) {
@@ -245,7 +245,7 @@ $skipped   = [System.Collections.Generic.List[object]]::new()
 
 foreach ($group in $allGroups) {
 
-    # ── Exclusion by name ───────────────────────────────────
+    # --Exclusion by name
     if (Test-IsExcluded $group.DisplayName) {
         $skipped.Add([PSCustomObject]@{
             DisplayName          = $group.DisplayName
@@ -264,7 +264,7 @@ foreach ($group in $allGroups) {
         }); continue
     }
 
-    # ── Match to activity report ────────────────────────────
+    # --Match to activity report
     $activity    = $activityMap[$group.Id]
     $lastActivity = if ($activity) { Get-LastActivityDate $activity } else { $null }
     $hasTeam   = $activity ? [bool]$activity.HasTeam : ($group.ResourceProvisioningOptions -contains "Team")
@@ -288,17 +288,17 @@ foreach ($group in $allGroups) {
         SkipReason              = $null
     }
 
-    # ── No activity data – skip, we can't determine staleness ──
+    # --No activity data - skip, we can't determine staleness
     if (-not $lastActivity) {
         $entry.SkipReason    = "NoActivityData"
         $entry.PlannedAction = "Skipped"
         $skipped.Add($entry); continue
     }
 
-    # ──  Calculate days since last activity for reporting ──
+    # -- Calculate days since last activity for reporting
     $entry.DaysSinceLastActivity = [math]::Round(((Get-Date) - $lastActivity).TotalDays)
 
-    # ── Classify ────────────────────────────────────────────
+    # --Classify 
     if ($lastActivity  -le $deleteCutoff) {
         $entry.PlannedAction = "Delete"
         $toDelete.Add($entry)
@@ -323,34 +323,34 @@ if ($toDelete.Count -eq 0 -and $staleOnly.Count -eq 0) {
 }
 
 if ($ReportOnly) {
-    Write-Log "`n── Groups that WOULD be deleted ($($toDelete.Count)) ──────────────────"
+    Write-Log "`n--Groups that WOULD be deleted ($($toDelete.Count))"
     $toDelete | Format-Table DisplayName, Owners, HasTeam, MemberCount, SharePointActiveFiles, `
     SharePointStorageUsed, ExchangeStorageUsed, LastActivityDate, DaysSinceLastActivity -AutoSize | Out-String | Write-Output
 
-    Write-Log "── Groups that are stale but below delete threshold ($($staleOnly.Count)) ──"
+    Write-Log "--Groups that are stale but below delete threshold ($($staleOnly.Count))"
     $staleOnly | Format-Table DisplayName, HasTeam, MemberCount, LastActivityDate, DaysSinceLastActivity -AutoSize | Out-String | Write-Output
 
-    Write-Log "ReportOnly mode active – no changes were made." -Level WARNING
+    Write-Log "ReportOnly mode active - no changes were made." -Level WARNING
     Disconnect-MgGraph | Out-Null
     exit 0
 }
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 # Delete stale groups
 # Note: deleted M365 Groups go to the recycle bin and can be
 # restored within 30 days via the Entra ID portal or PowerShell.
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------
 Write-Log "--- Deleting stale M365 Groups ---"
 $deleteResults = [System.Collections.Generic.List[object]]::new()
 
 foreach ($group in $toDelete) {
     try {
 
-        # ─────────────────────────────────────────────────────────────
+        # -------------------------------------------------------------
         #
         ## WARNING: The actual deletion command is commented out for safety. Uncomment to enable deletion.
         #
-        # ─────────────────────────────────────────────────────────────
+        # -------------------------------------------------------------
 
         # Remove-MgGroup -GroupId $group.ObjectId
         # Write-Log "Deleted: $($group.DisplayName) (inactive $($group.DaysSinceLastActivity) days)" -Level SUCCESS
@@ -362,7 +362,7 @@ foreach ($group in $toDelete) {
     }
     catch {
         Write-Log "Failed to delete $($group.DisplayName): $_" -Level WARNING
-        $group.PlannedAction = "DeleteFailed – $($_.Exception.Message)"
+        $group.PlannedAction = "DeleteFailed - $($_.Exception.Message)"
     }
     $deleteResults.Add($group)
 }
