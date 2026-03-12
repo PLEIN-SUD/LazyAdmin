@@ -104,18 +104,6 @@ function Write-Log {
 }
 
 # ─────────────────────────────────────────────────────────────
-# Module check / install
-# ─────────────────────────────────────────────────────────────
-function Assert-Module {
-    param([string]$Name)
-    if (-not (Get-Module -ListAvailable -Name $Name)) {
-        Write-Log "Installing module $Name ..." -Level WARNING
-        Install-Module -Name $Name -Scope CurrentUser -Force -AllowClobber
-    }
-    Import-Module $Name -ErrorAction Stop
-}
-
-# ─────────────────────────────────────────────────────────────
 # Connect to Microsoft Graph
 # ─────────────────────────────────────────────────────────────
 function Connect-ToGraph {
