@@ -273,7 +273,13 @@ function Get-ReplicationData($computername) {
     try {
         $replResult.lastRepAttempt = @()
         $replLastRepAttempt = ($repPartnerData | Where-Object {$_.Partner -match ($replResult.repPartner)}).LastReplicationAttempt
-        $replFrequency = (Get-ADReplicationSiteLink -Filter *)[0].ReplicationFrequencyInMinutes
+        # Does not return an array with a single link
+        $replFrequencyQueryResult = Get-ADReplicationSiteLink -Filter *
+        if ($replFrequencyQueryResult -is [array]) {
+            $replFrequency = $replFrequencyQueryResult[0].ReplicationFrequencyInMinutes
+        } else {
+            $replFrequency = $replFrequencyQueryResult.ReplicationFrequencyInMinutes
+        }
         
         if (((Get-Date) - $replLastRepAttempt).Minutes -gt $replFrequency) {
             $replResult.lastRepAttempt += "Warning"
