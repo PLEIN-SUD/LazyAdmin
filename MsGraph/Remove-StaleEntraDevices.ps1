@@ -75,13 +75,15 @@
 param (
     [Parameter()][int]         $StaleThresholdDays      = 90,
     [Parameter()][int]         $DeleteThresholdDays     = 120,
-    [Parameter()][switch]      $ReportOnly              = $true,
-    [Parameter()][switch]      $IncludeBitLockerDevices,
+    [Parameter()][bool]        $ReportOnly              = $false,
+    [Parameter()][bool]        $IncludeBitLockerDevices = $false,
     [Parameter()][string[]]    $ExcludeDeviceNames      = @(),
     [Parameter()][string[]]    $ExcludeOperatingSystems = @(),
-    [Parameter()][switch]      $RunbookMode,
+    [Parameter()][bool]        $RunbookMode             = $false,
     [Parameter()][string]      $TenantId,
-    [Parameter()][string]      $ExportPath              = $PSScriptRoot
+    [Parameter()][string]      $ExportPath              = $PSScriptRoot,
+    [Parameter()][string]      $ReportEmailTo,
+    [Parameter()][string]      $ReportEmailFrom
 )
 
 $ErrorActionPreference = "Stop"
@@ -122,7 +124,7 @@ function Connect-ToGraph {
     else {
         Write-Log "Authenticating interactively..."
         $p = @{
-            Scopes    = @("Device.Read.All","Device.ReadWrite.All","BitLockerKey.Read.All")
+            Scopes    = @("Device.ReadWrite.All","BitLockerKey.Read.All","Mail.Send")
             NoWelcome = $true
         }
         if ($TenantId) { $p.TenantId = $TenantId }
@@ -186,10 +188,58 @@ function Test-IsExcluded {
 # CSV export
 # -------------------------------------------------------------
 function Export-Report {
-    param($Data, [string]$Suffix)
-    $file = Join-Path $ExportPath "EntraID_${Suffix}_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
-    $Data | Export-Csv -Path $file -NoTypeInformation -Encoding UTF8
-    Write-Log "Report saved: $file" -Level SUCCESS
+    param(
+        $Data,
+        [string]$Suffix,
+        [string]$Subject
+    )
+
+    # Always build the CSV content in memory
+    $csvContent = $Data | ConvertTo-Csv -NoTypeInformation | Out-String
+
+    if ($RunbookMode) {
+        # Email via Microsoft Graph
+        if (-not $ReportEmailTo -or -not $ReportEmailFrom) {
+            Write-Log "ReportEmailTo and ReportEmailFrom are required in Runbook mode." -Level WARNING
+            return
+        }
+
+        $fileName    = "EntraID_${Suffix}_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+        $base64Csv   = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($csvContent))
+
+        $message = @{
+            subject = $Subject
+            body    = @{
+                contentType = "Text"
+                content     = "Attached the Stale Devices Cleanup report.`n`nRun time: $(Get-Date)`nReport: $Suffix"
+            }
+            toRecipients = @(
+                @{ emailAddress = @{ address = $ReportEmailTo } }
+            )
+            attachments = @(
+                @{
+                    "@odata.type"  = "#microsoft.graph.fileAttachment"
+                    name           = $fileName
+                    contentType    = "text/csv"
+                    contentBytes   = $base64Csv
+                }
+            )
+        }
+
+        try {
+            Send-MgUserMail -UserId $ReportEmailFrom -BodyParameter @{ message = $message }
+            Write-Log "Report emailed to $ReportEmailTo" -Level SUCCESS
+        }
+        catch {
+            Write-Log "Failed to send email: $_" -Level ERROR
+        }
+    }
+    else {
+        # Save to disk locally
+        $file = Join-Path $ExportPath "EntraID_${Suffix}_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+        $csvContent | Out-File -FilePath $file -Encoding UTF8
+        Write-Log "Report saved: $file" -Level SUCCESS
+    }
 }
 
 
@@ -318,7 +368,14 @@ Write-Log "Devices to delete  : $($toDelete.Count)"
 Write-Log "Devices skipped    : $($skipped.Count)"
 
 # 4. Always export a pre-run inventory
-Export-Report -Data (@($toDisable) + @($toDelete) + @($skipped)) -Suffix "PreCleanup"
+$foundCount  = $toDisable.Count + $toDelete.Count
+$subject     = if ($foundCount -gt 0) {
+                   "[$($foundCount) found] Entra ID Stale Device Report - $(Get-Date -Format 'yyyy-MM-dd')"
+               } else {
+                   "[Nothing found] Entra ID Stale Device Report - $(Get-Date -Format 'yyyy-MM-dd')"
+               }
+
+Export-Report -Data (@($toDisable) + @($toDelete) + @($skipped)) -Suffix "PreCleanup" -Subject $subject
 
 if ($toDisable.Count -eq 0 -and $toDelete.Count -eq 0) {
     Write-Log "Nothing to process. Exiting." -Level SUCCESS
@@ -377,7 +434,7 @@ foreach ($device in $toDelete) {
 }
 
 # 5. Export final results
-Export-Report -Data (@($disableResults) + @($deleteResults) + @($skipped)) -Suffix "CleanupResults"
+Export-Report -Data (@($disableResults) + @($deleteResults) + @($skipped)) -Suffix "CleanupResults" -Subject $subject
 
 Write-Log "All done." -Level SUCCESS
 Disconnect-MgGraph | Out-Null

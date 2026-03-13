@@ -72,13 +72,13 @@ param (
     [Parameter()][int]         $StaleThresholdDays   = 90,
     [Parameter()][int]         $DeleteThresholdDays  = 120,
     [Parameter()][int]         $NeverSignedInDays    = 7,
-    [Parameter()][switch]      $ReportOnly           = $true,
+    [Parameter()][bool]        $ReportOnly           = $false,
     [Parameter()][string[]]    $ExcludeDomains       = @(),
-    [Parameter()][switch]      $RunbookMode,
+    [Parameter()][bool]        $RunbookMode          = $false,
     [Parameter()][string]      $TenantId,
-    [Parameter()][string]      $ClientId,
-    [Parameter()][SecureString]$ClientSecret,
-    [Parameter()][string]      $ExportPath           = $PSScriptRoot
+    [Parameter()][string]      $ExportPath           = $PSScriptRoot,
+    [Parameter()][string]      $ReportEmailTo,
+    [Parameter()][string]      $ReportEmailFrom
 )
 
 $ErrorActionPreference = "Stop"
@@ -118,7 +118,7 @@ function Connect-ToGraph {
     else {
         Write-Log "Authenticating interactively..."
         $p = @{
-            Scopes             = @("User.Read.All","User.ReadWrite.All","AuditLog.Read.All")
+            Scopes             = @("User.ReadWrite.All","AuditLog.Read.All","Mail.Send")
             NoWelcome          = $true
         }
         if ($TenantId) { $p.TenantId = $TenantId }
@@ -147,10 +147,58 @@ function Test-IsExcludedDomain {
 # CSV export
 # -------------------------------------------------------------
 function Export-Report {
-    param($Data, [string]$Suffix)
-    $file = Join-Path $ExportPath "EntraID_GuestUsers_${Suffix}_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
-    $Data | Export-Csv -Path $file -NoTypeInformation -Encoding UTF8
-    Write-Log "Report saved: $file" -Level SUCCESS
+    param(
+        $Data,
+        [string]$Suffix,
+        [string]$Subject
+    )
+
+    # Always build the CSV content in memory
+    $csvContent = $Data | ConvertTo-Csv -NoTypeInformation | Out-String
+
+    if ($RunbookMode) {
+        # Email via Microsoft Graph
+        if (-not $ReportEmailTo -or -not $ReportEmailFrom) {
+            Write-Log "ReportEmailTo and ReportEmailFrom are required in Runbook mode." -Level WARNING
+            return
+        }
+
+        $fileName    = "EntraID_${Suffix}_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+        $base64Csv   = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($csvContent))
+
+        $message = @{
+            subject = $Subject
+            body    = @{
+                contentType = "Text"
+                content     = "Attached the Stale Guest Users Cleanup report.`n`nRun time: $(Get-Date)`nReport: $Suffix"
+            }
+            toRecipients = @(
+                @{ emailAddress = @{ address = $ReportEmailTo } }
+            )
+            attachments = @(
+                @{
+                    "@odata.type"  = "#microsoft.graph.fileAttachment"
+                    name           = $fileName
+                    contentType    = "text/csv"
+                    contentBytes   = $base64Csv
+                }
+            )
+        }
+
+        try {
+            Send-MgUserMail -UserId $ReportEmailFrom -BodyParameter @{ message = $message }
+            Write-Log "Report emailed to $ReportEmailTo" -Level SUCCESS
+        }
+        catch {
+            Write-Log "Failed to send email: $_" -Level ERROR
+        }
+    }
+    else {
+        # Save to disk locally
+        $file = Join-Path $ExportPath "EntraID_${Suffix}_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+        $csvContent | Out-File -FilePath $file -Encoding UTF8
+        Write-Log "Report saved: $file" -Level SUCCESS
+    }
 }
 
 
@@ -262,7 +310,15 @@ Write-Log "Never signed in       : $($neverSignedIn.Count)"
 Write-Log "Skipped               : $($skipped.Count)"
 
 # 3. Always export a pre-run inventory
-Export-Report -Data (@($toDisable) + @($toDelete) + @($neverSignedIn) + @($skipped)) -Suffix "PreCleanup"
+# Pre-cleanup report
+$foundCount  = $toDisable.Count + $toDelete.Count
+$subject     = if ($foundCount -gt 0) {
+                   "[$($foundCount) found] Entra ID Stale Guest Users Report - $(Get-Date -Format 'yyyy-MM-dd')"
+               } else {
+                   "[Nothing found] Entra ID Stale Guest Users Report - $(Get-Date -Format 'yyyy-MM-dd')"
+               }
+
+Export-Report -Data (@($toDisable) + @($toDelete) + @($skipped)) -Suffix "PreCleanup" -Subject $subject
 
 if ($toDisable.Count -eq 0 -and $toDelete.Count -eq 0) {
     Write-Log "Nothing to process. Exiting." -Level SUCCESS
@@ -324,7 +380,7 @@ foreach ($guest in $toDelete) {
 }
 
 # 4. Export final results
-Export-Report -Data (@($disableResults) + @($deleteResults) + @($neverSignedIn) + @($skipped)) -Suffix "CleanupResults"
+Export-Report -Data (@($disableResults) + @($deleteResults) + @($skipped)) -Suffix "CleanupResults" -Subject $subject
 
 Write-Log "All done." -Level SUCCESS
 Disconnect-MgGraph | Out-Null
