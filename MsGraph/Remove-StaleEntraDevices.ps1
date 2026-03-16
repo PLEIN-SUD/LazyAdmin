@@ -284,17 +284,24 @@ $skipped   = [System.Collections.Generic.List[object]]::new()
 
 foreach ($device in $allDevices) {
 
-     # Resolve last activity date
+    # Resolve last activity date
     $lastSignIn = if ($device.ApproximateLastSignInDateTime) {
                       [datetime]$device.ApproximateLastSignInDateTime
                   } elseif ($device.RegistrationDateTime) {
                       [datetime]$device.RegistrationDateTime
                   } else {
-                      [datetime]"1970-01-01"
+                      $null
                   }
+
+    # No date data at all - skip silently, not enough info to evaluate
+    if (-not $lastSignIn) { continue }
+
+    # Not stale - skip silently, nothing to report
+    if ($lastSignIn -gt $disableCutoff) { continue }
 
     $daysSince = [math]::Round(((Get-Date) - $lastSignIn).TotalDays)
 
+    # Build entry - only for stale devices
     $entry = [PSCustomObject]@{
         DisplayName               = $device.DisplayName
         DeviceId                  = $device.DeviceId
@@ -311,54 +318,48 @@ foreach ($device in $allDevices) {
         RegistrationDateTime      = $device.RegistrationDateTime
         ApproximateLastSignInDate = $lastSignIn
         DaysSinceLastSignIn       = $daysSince
-        HasBitLockerKey           = $false
+        HasBitLockerKey           = "N/A"
         PlannedAction             = $null
         SkipReason                = $null
     }
-    # --System-managed / Autopilot guard 
-    if (Test-IsSystemManaged $device) {
-        Write-Log "Skipping system-managed device: $($device.DisplayName)" -Level WARNING
-        $entry.SkipReason   = "SystemManaged"
-        $entry.PlannedAction = "Skipped"
-        $skipped.Add($entry); continue
-    }
 
-    # --Exclusion filters
-    if (Test-IsExcluded $device) {
-        $entry.SkipReason   = "ExcludedByFilter"
-        $entry.PlannedAction = "Skipped"
-        $skipped.Add($entry); continue
-    }
-    
-    # Skip devices with no sign-in AND no registration date (Registered Pending / activity N/A)
-    if (-not $device.ApproximateLastSignInDateTime -and -not $device.RegistrationDateTime) {
-        $entry.SkipReason    = "RegistrationPending"
-        $entry.PlannedAction = "Skipped"
-        $skipped.Add($entry); continue
-    }   
-
+    # Check BitLocker for all stale devices
     $entry.HasBitLockerKey = Test-HasBitLockerKey -DeviceId $device.DeviceId
 
-    # --Stage 2: delete candidate
-    # Device is already disabled AND past the delete threshold
-    if ($lastSignIn -le $deleteCutoff -and $device.AccountEnabled -eq $false) {
+    # Stale but system managed - report only, no action
+    if (Test-IsSystemManaged $device) {
+        $entry.SkipReason    = "SystemManaged"
+        $entry.PlannedAction = "SkippedManualReviewNeeded"
+        $skipped.Add($entry); continue
+    }
 
-        if ($entry.HasBitLockerKey -and -not $IncludeBitLockerDevices) {
-            Write-Log "Skipping - BitLocker key present: $($device.DisplayName)" -Level WARNING
+    # Stale but excluded by filter - report only, no action
+    if (Test-IsExcluded $device) {
+        $entry.SkipReason    = "ExcludedByFilter"
+        $entry.PlannedAction = "Skipped"
+        $skipped.Add($entry); continue
+    }
+
+    # Stage 2: delete candidate - already disabled AND past delete threshold
+    if ($lastSignIn -le $deleteCutoff -and $device.AccountEnabled -eq $false) {
+        if ($entry.HasBitLockerKey -eq $true -and -not $IncludeBitLockerDevices) {
             $entry.SkipReason    = "BitLockerKeyPresent"
-            $entry.PlannedAction  = "Skipped"
+            $entry.PlannedAction = "Skipped"
             $skipped.Add($entry); continue
         }
-
         $entry.PlannedAction = "Delete"
         $toDelete.Add($entry); continue
     }
 
-    # --Stage 1: disable candidate
+    # Stage 1: disable candidate - active AND past disable threshold
     if ($lastSignIn -le $disableCutoff -and $device.AccountEnabled -eq $true) {
         $entry.PlannedAction = "Disable"
-        $toDisable.Add($entry)
+        $toDisable.Add($entry); continue
     }
+
+    # Stale but doesn't fit Stage 1 or 2 yet - already disabled but not past delete threshold
+    $entry.PlannedAction = "DisabledPendingDeletion"
+    $skipped.Add($entry)
 }
 
 Write-Log "Devices to disable : $($toDisable.Count)"
