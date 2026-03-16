@@ -75,7 +75,7 @@
 param (
     [Parameter()][int]         $StaleThresholdDays      = 90,
     [Parameter()][int]         $DeleteThresholdDays     = 120,
-    [Parameter()][bool]        $ReportOnly              = $false,
+    [Parameter()][bool]        $ReportOnly              = $true,
     [Parameter()][bool]        $IncludeBitLockerDevices = $false,
     [Parameter()][string[]]    $ExcludeDeviceNames      = @(),
     [Parameter()][string[]]    $ExcludeOperatingSystems = @(),
@@ -162,7 +162,7 @@ function Test-IsSystemManaged {
     if ($Device.EnrollmentProfileName) { return $true }
 
     # Co-managed / Autopilot enrollment types
-    if ($Device.EnrollmentType -in @("windowsCoManagement","azureAdJoined")) { return $true }
+    if ($Device.EnrollmentType -in @("windowsCoManagement")) { return $true }
 
     # Hybrid Entra Joined devices are managed via on-premises AD - skip them
     if ($Device.TrustType -eq "ServerAd") { return $true }
@@ -284,14 +284,7 @@ $skipped   = [System.Collections.Generic.List[object]]::new()
 
 foreach ($device in $allDevices) {
 
-    # Skip devices with no sign-in AND no registration date (Registered Pending / activity N/A)
-    if (-not $device.ApproximateLastSignInDateTime -and -not $device.RegistrationDateTime) {
-        $entry.SkipReason    = "RegistrationPending"
-        $entry.PlannedAction = "Skipped"
-        $skipped.Add($entry); continue
-    }
-
-    # Resolve last activity date
+     # Resolve last activity date
     $lastSignIn = if ($device.ApproximateLastSignInDateTime) {
                       [datetime]$device.ApproximateLastSignInDateTime
                   } elseif ($device.RegistrationDateTime) {
@@ -322,14 +315,6 @@ foreach ($device in $allDevices) {
         PlannedAction             = $null
         SkipReason                = $null
     }
-
-    # --Exclusion filters
-    if (Test-IsExcluded $device) {
-        $entry.SkipReason   = "ExcludedByFilter"
-        $entry.PlannedAction = "Skipped"
-        $skipped.Add($entry); continue
-    }
-
     # --System-managed / Autopilot guard 
     if (Test-IsSystemManaged $device) {
         Write-Log "Skipping system-managed device: $($device.DisplayName)" -Level WARNING
@@ -338,14 +323,27 @@ foreach ($device in $allDevices) {
         $skipped.Add($entry); continue
     }
 
+    # --Exclusion filters
+    if (Test-IsExcluded $device) {
+        $entry.SkipReason   = "ExcludedByFilter"
+        $entry.PlannedAction = "Skipped"
+        $skipped.Add($entry); continue
+    }
+    
+    # Skip devices with no sign-in AND no registration date (Registered Pending / activity N/A)
+    if (-not $device.ApproximateLastSignInDateTime -and -not $device.RegistrationDateTime) {
+        $entry.SkipReason    = "RegistrationPending"
+        $entry.PlannedAction = "Skipped"
+        $skipped.Add($entry); continue
+    }   
+
+    $entry.HasBitLockerKey = Test-HasBitLockerKey -DeviceId $device.DeviceId
+
     # --Stage 2: delete candidate
     # Device is already disabled AND past the delete threshold
     if ($lastSignIn -le $deleteCutoff -and $device.AccountEnabled -eq $false) {
 
-        $hasBLKey = Test-HasBitLockerKey -DeviceId $device.DeviceId
-        $entry.HasBitLockerKey = $hasBLKey
-
-        if ($hasBLKey -and -not $IncludeBitLockerDevices) {
+        if ($entry.HasBitLockerKey -and -not $IncludeBitLockerDevices) {
             Write-Log "Skipping - BitLocker key present: $($device.DisplayName)" -Level WARNING
             $entry.SkipReason    = "BitLockerKeyPresent"
             $entry.PlannedAction  = "Skipped"
@@ -403,7 +401,7 @@ $disableResults = [System.Collections.Generic.List[object]]::new()
 
 foreach ($device in $toDisable) {
     try {
-        Update-MgDevice -DeviceId $device.ObjectId -BodyParameter @{ accountEnabled = $false }
+        #Update-MgDevice -DeviceId $device.ObjectId -BodyParameter @{ accountEnabled = $false }
         Write-Log "Disabled: $($device.DisplayName) (inactive $($device.DaysSinceLastSignIn) days)" -Level SUCCESS
         $device.PlannedAction = "Disabled"
     }
@@ -422,7 +420,7 @@ $deleteResults = [System.Collections.Generic.List[object]]::new()
 
 foreach ($device in $toDelete) {
     try {
-        Remove-MgDevice -DeviceId $device.ObjectId
+        #Remove-MgDevice -DeviceId $device.ObjectId
         Write-Log "Deleted: $($device.DisplayName) (inactive $($device.DaysSinceLastSignIn) days)" -Level SUCCESS
         $device.PlannedAction = "Deleted"
     }

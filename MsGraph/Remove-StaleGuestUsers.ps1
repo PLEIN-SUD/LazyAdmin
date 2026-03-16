@@ -349,7 +349,7 @@ $disableResults = [System.Collections.Generic.List[object]]::new()
 
 foreach ($guest in $toDisable) {
     try {
-        Update-MgUser -UserId $guest.ObjectId -AccountEnabled $false
+        Update-MgUser -UserId $guest.ObjectId -AccountEnabled:$false
         Write-Log "Disabled: $($guest.DisplayName) ($($guest.UserPrincipalName))" -Level SUCCESS
         $guest.PlannedAction = "Disabled"
     }
